@@ -1,0 +1,125 @@
+---
+title: "Activity Performance Evaluation"
+author: "Shaik Fiaz"
+date: "6 March 2016"
+output: html_document
+---
+
+# Executive summary
+
+This analysis is done as part of coursera practical machine learning course. We analyse the data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants to classify them into 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset). For this we used random forest method.
+
+# Steps in model building
+1. Download the data
+1. Splitting data into sub-test and sub-train sets
+2. Preprocessing and Feature selection. 
+3. Model building
+4. Model validation
+5. Prediction
+
+## Data preperation
+First we will download the data in to a local folder
+```{r}
+rm(list=ls())
+library(downloader)
+TrainFile<-"pml-training.csv"
+TestFile<-"pml-testing.csv"
+DataDir<-"~/Documents/Data Science/R Programs/Machine Learning/Course Project"
+TrainDestFile=paste(DataDir,TrainFile,sep = "/")
+TestDestFile<-paste(DataDir,TestFile,sep="/")
+trainurl <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+if(!file.exists(TrainDestFile)){download(trainurl, dest=DestFile, mode="wb") }
+testurl <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+if(!file.exists(TestDestFile)){download(testurl, dest=TestDestFile, mode="wb") }
+D.Train=read.csv(TrainDestFile,header = TRUE)
+D.Test=read.csv(TestDestFile,header = TRUE)
+D.Train=D.Train[,-1]#Removing the index
+D.Test=D.Test[,-1]#Removing the index
+```
+
+## Splitting data into sub-test and sub-train sets
+
+In order to build the model we will further devide the training data into two sub parts i.e sub-train and sub-test data sets.
+```{r}
+library(caret)
+set.seed(100)
+trainID <- createDataPartition(D.Train$classe, p = 0.7, list = FALSE)
+Data.SubTrain <- D.Train[trainID, ]
+Data.SubVal <- D.Train[-trainID, ]
+```
+
+## Preprocessing and feature selection
+As the number of features are too big `r dim(Data.SubTrain)[2]` we will do the following feature selection methods
+
+1. Remove columns with more than 40% "NA" values
+2. Remove columns which are statistically constant in all the samples
+
+```{r}
+#Removing the features which have morethan 40% of NAs
+NASums=as.data.frame(t(colSums(is.na(Data.SubTrain))))
+Id.NaSums=NASums<=0.4*nrow(Data.SubTrain)
+Data.SubTrain=Data.SubTrain[,Id.NaSums]
+Data.SubVal=Data.SubVal[,Id.NaSums]
+D.Test=D.Test[,Id.NaSums]
+```
+
+```{r}
+# Removing near zero variance features
+Id.NearZero <- nearZeroVar(Data.SubTrain)
+Data.SubTrain <- Data.SubTrain[, -Id.NearZero]
+Data.SubVal=Data.SubVal[,-Id.NearZero]
+D.Test=D.Test[,-Id.NearZero]
+dim(Data.SubTrain)
+```
+
+After removing the features which are not useful we are left with following `r (ncol(Data.SubTrain)-1)` features
+```{r}
+colnames(Data.SubTrain[,c(1:(ncol(Data.SubTrain)-1))])
+```
+
+We will also remove the index and time stamps variables from predictor list as these physically make no sense to be predictors.
+
+```{r}
+Data.SubTrain=subset(Data.SubTrain,select = -c(user_name,raw_timestamp_part_1,raw_timestamp_part_2,cvtd_timestamp))
+Data.SubVal=subset(Data.SubVal,select = -c(user_name,raw_timestamp_part_1,raw_timestamp_part_2,cvtd_timestamp))
+D.Test=subset(D.Test,select = -c(user_name,raw_timestamp_part_1,raw_timestamp_part_2,cvtd_timestamp))
+```
+
+# Model building
+
+As the problem is about predicting the class of activity we need to do classification. We use random forests for the following reasons
+
+1. Random forest are useful in understanding variable importance
+2. Can deal with higher order interactions and correlated predictors
+
+```{r}
+require(randomForest)
+model_rf<-randomForest(classe~.,data=Data.SubTrain, importance = TRUE, ntrees = 20)
+print(model_rf)
+```
+
+# Checking the performance on both model and test data (Validation)
+First we will check the model accuracy
+```{r}
+Pred.Training <- predict(model_rf, Data.SubTrain)
+Con.Matrix.Model<-confusionMatrix(Pred.Training, Data.SubTrain$classe)
+print(Con.Matrix.Model)
+```
+
+We have accuracy of `r Con.Matrix.Model$overall[1]` for training data. Now we will use the model to check its performance on test data
+
+
+```{r}
+Pred.Validation <- predict(model_rf, Data.SubVal)
+Con.Matrix.Test<-confusionMatrix(Pred.Validation, Data.SubVal$classe)
+print(Con.Matrix.Test)
+```
+
+From above the accuracy of `r Con.Matrix.Test$overall[1]` is pretty good. Therefore we stick to this model instead of going to ensembling of multiple algorithms.
+
+Finally we check the output of prediction using test data
+
+```{r}
+Pred.Test <- predict(model_rf, D.Test)
+Pred.Test
+```
